@@ -8,7 +8,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import csv
 import os
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 
@@ -240,7 +240,7 @@ class SensorDataProcessor:
         self.sensor_ref_position.grid(row=1, column=3, padx=5, pady=5)
 
         ttk.Button(form_frame, text="➕ Dodaj czujnik",
-                  command=self.add_sensor, style='Action.TButton').grid(row=1, column=8, padx=10)
+                  command=self.add_sensor, style='Action.TButton').grid(row=1, column=4, columnspan=2, padx=10, pady=5)
 
         # Lista czujników
         list_label = ttk.Label(self.tab2, text="Zdefiniowane czujniki:", style='Title.TLabel')
@@ -374,10 +374,17 @@ class SensorDataProcessor:
                 if not row or not row[0]:
                     continue
 
-                # Parsuj timestamp
+                # Parsuj timestamp (UTC) i konwertuj na czas lokalny
                 timestamp_str = row[0]
                 try:
-                    timestamp = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+                    # Timestamp w pliku jest w UTC
+                    timestamp_utc = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+                    # Dodaj informację o UTC
+                    timestamp_utc = timestamp_utc.replace(tzinfo=timezone.utc)
+                    # Konwertuj na czas lokalny
+                    timestamp_local = timestamp_utc.astimezone()
+                    # Format dla wyświetlania (bez strefy czasowej)
+                    timestamp_local_str = timestamp_local.strftime("%Y-%m-%d %H:%M:%S")
                 except:
                     continue
 
@@ -391,8 +398,8 @@ class SensorDataProcessor:
                         temps[channel] = None
 
                 measurements.append({
-                    'timestamp': timestamp,
-                    'timestamp_str': timestamp_str,
+                    'timestamp': timestamp_local.replace(tzinfo=None),  # Dla porównania bez tzinfo
+                    'timestamp_str': timestamp_local_str,  # Już w czasie lokalnym
                     'temperatures': temps
                 })
 
@@ -785,9 +792,13 @@ class SensorDataProcessor:
         # Jeśli czujnik ma dane referencyjne, przygotuj je
         ref_temps = []
         ref_datetimes = []
+        offsets = []  # Offset dla każdego pomiaru
         has_reference = sensor['ref_channel'] is not None and sensor['ref_position'] is not None
 
         if has_reference:
+            # Znajdź indeks pozycji czujnika referencyjnego
+            ref_position_idx = positions.index(sensor['ref_position'])
+
             # Dla każdego pomiaru światłowodowego znajdź odpowiedni pomiar referencyjny
             for measurement in self.merged_data['measurements']:
                 ref_temp, ref_datetime = self.find_reference_temperature(
@@ -796,6 +807,17 @@ class SensorDataProcessor:
                 )
                 ref_temps.append(ref_temp if ref_temp is not None else '')
                 ref_datetimes.append(ref_datetime if ref_datetime is not None else '')
+
+                # Oblicz offset (różnica między temperaturą referencyjną a światłowodową)
+                if ref_temp is not None:
+                    try:
+                        fiber_temp_at_ref_position = float(measurement['measurements'][ref_position_idx])
+                        offset = ref_temp - fiber_temp_at_ref_position
+                        offsets.append(offset)
+                    except:
+                        offsets.append(0.0)
+                else:
+                    offsets.append(0.0)
 
         # Zapisz do pliku
         with open(filepath, 'w', encoding='utf-8', newline='') as f:
@@ -825,17 +847,41 @@ class SensorDataProcessor:
                 for i in range(len(sensor_positions)):
                     original_idx = end_idx - i
                     position = sensor_positions[i]
-                    row = [f"{position:.2f}"] + [m['measurements'][original_idx]
-                                                 for m in self.merged_data['measurements']]
-                    writer.writerow(row)
+
+                    # Zastosuj offset jeśli są dane referencyjne
+                    if has_reference:
+                        row = [f"{position:.2f}"]
+                        for j, m in enumerate(self.merged_data['measurements']):
+                            try:
+                                calibrated_value = float(m['measurements'][original_idx]) + offsets[j]
+                                row.append(f"{calibrated_value:.2f}")
+                            except:
+                                row.append(m['measurements'][original_idx])
+                        writer.writerow(row)
+                    else:
+                        row = [f"{position:.2f}"] + [m['measurements'][original_idx]
+                                                     for m in self.merged_data['measurements']]
+                        writer.writerow(row)
             else:
                 # Normalne dane
                 for i in range(len(sensor_positions)):
                     original_idx = start_idx + i
                     position = sensor_positions[i]
-                    row = [f"{position:.2f}"] + [m['measurements'][original_idx]
-                                                 for m in self.merged_data['measurements']]
-                    writer.writerow(row)
+
+                    # Zastosuj offset jeśli są dane referencyjne
+                    if has_reference:
+                        row = [f"{position:.2f}"]
+                        for j, m in enumerate(self.merged_data['measurements']):
+                            try:
+                                calibrated_value = float(m['measurements'][original_idx]) + offsets[j]
+                                row.append(f"{calibrated_value:.2f}")
+                            except:
+                                row.append(m['measurements'][original_idx])
+                        writer.writerow(row)
+                    else:
+                        row = [f"{position:.2f}"] + [m['measurements'][original_idx]
+                                                     for m in self.merged_data['measurements']]
+                        writer.writerow(row)
 
         ref_info = ""
         if has_reference:

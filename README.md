@@ -94,14 +94,18 @@ Time:;08:38:02;08:40:04;08:42:04;...
 Date:;01.10.2025;01.10.2025;01.10.2025;...
 Time:;08:38:02;08:40:04;08:42:04;...
 Ref_Temp(CH001@5.00m):;14.254;14.250;14.251;...    ← (jeśli dodano dane referencyjne)
-Ref_DateTime:;2025-10-01 08:38:00;2025-10-01 08:40:00;...    ← (jeśli dodano dane referencyjne)
-5.00;14.48;14.64;14.89;...
+Ref_DateTime:;2025-10-01 10:38:00;2025-10-01 10:40:00;...    ← (w czasie lokalnym!)
+5.00;14.25;14.25;14.25;...    ← (SKALIBROWANE - temperatura na metrze ref. = Ref_Temp!)
 5.25;13.82;13.89;14.21;...
 ...
 ```
 - Tylko wybrany zakres metrów (od metr początkowy do metr końcowy)
 - Jeśli zaznaczono "Odwróć", dane są w odwróconej kolejności
-- Jeśli wybrano kanał referencyjny, dodawane są 2 dodatkowe wiersze z temperaturą referencyjną i datą/godziną pomiaru
+- **KALIBRACJA:** Jeśli wybrano kanał referencyjny:
+  - Dodawane są 2 wiersze: temperatura referencyjna i data/czas (w czasie lokalnym, nie UTC!)
+  - **WSZYSTKIE** wartości temperatury są automatycznie kalibrowane: do każdego pomiaru dodawany jest offset
+  - Offset = Temp_Referencyjna - Temp_Światłowód_na_pozycji_ref
+  - Po kalibracji temperatura na metrze referencyjnym będzie równa temperaturze z czujnika punktowego
 
 ## Funkcje aplikacji
 
@@ -109,11 +113,41 @@ Ref_DateTime:;2025-10-01 08:38:00;2025-10-01 08:40:00;...    ← (jeśli dodano 
 ✅ **Zamiana separatorów** - Przecinki zamieniane na kropki dziesiętne
 ✅ **Inteligentne dopasowanie** - Automatyczne znajdowanie najbliższych pozycji
 ✅ **Odwracanie czujników** - Możliwość odwrócenia danych dla wybranych czujników
-✅ **Kalibracja referencyjna** - Dodawanie pomiarów z czujników punktowych do weryfikacji temperatury
-✅ **Dopasowanie czasowe** - Automatyczne dopasowanie pomiarów referencyjnych do pomiarów światłowodowych
+✅ **Kalibracja referencyjna** - Automatyczna kalibracja pomiarów światłowodowych za pomocą czujników punktowych
+✅ **Dopasowanie czasowe** - Automatyczne dopasowanie pomiarów referencyjnych (UTC → czas lokalny)
+✅ **Korekcja offsetem** - Wszystkie pomiary korygowane o różnicę między czujnikiem światłowodowym a punktowym
 ✅ **Batch export** - Eksport wszystkich czujników jednym kliknięciem
 ✅ **Log eksportu** - Szczegółowy log wszystkich operacji eksportu
 ✅ **Intuicyjny interfejs** - Prosty 3-krokowy proces
+
+## Kalibracja za pomocą czujników referencyjnych
+
+### Jak działa kalibracja?
+
+Czujniki światłowodowe (reflektometry AP Sensing) doskonale pokazują **rozkład temperatury** wzdłuż kabla, ale mogą mieć błędy w **wartościach bezwzględnych**. Czujniki punktowe (z pliku `svws_measurements.csv`) są dokładniejsze w pomiarze temperatury w konkretnym miejscu.
+
+**Proces kalibracji:**
+
+1. **Dopasowanie czasowe:** Pomiary referencyjne z pliku (w UTC) są konwertowane na czas lokalny i dopasowywane do pomiarów światłowodowych po czasie
+
+2. **Obliczenie offsetu:** Dla każdego pomiaru obliczany jest offset:
+   ```
+   Offset = Temperatura_Referencyjna - Temperatura_Światłowód_na_pozycji_ref
+   ```
+
+3. **Korekcja wszystkich pomiarów:** Offset jest dodawany do **wszystkich** pozycji w danym pomiarze:
+   ```
+   Temperatura_Skalibrowana[każda_pozycja] = Temperatura_Oryginalna + Offset
+   ```
+
+4. **Wynik:** Po kalibracji temperatura na pozycji czujnika referencyjnego będzie dokładnie równa temperaturze z czujnika punktowego, a cały rozkład temperatury zostanie przesunięty o tę samą wartość.
+
+### Przykład:
+- Czujnik światłowodowy na 5.00m pokazuje: **14.0°C**
+- Czujnik referencyjny CH001 na 5.00m pokazuje: **14.5°C**
+- **Offset = 14.5 - 14.0 = +0.5°C**
+- Wszystkie pomiary zostaną skorygowane: +0.5°C
+- Po kalibracji na 5.00m będzie: **14.5°C** (zgodne z referencją!)
 
 ## Przykładowe zastosowanie
 
